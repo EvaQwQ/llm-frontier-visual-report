@@ -53,19 +53,10 @@ html[data-report-embed="true"] :is(.filter-panel,.dashboard-filter-card) { paddi
 html[data-report-embed="true"] .insight-pagination { display:none; }
 @media(min-width:1101px) {
   html[data-report-embed="true"] #chapter-2-dashboard {
-    height:100vh;
-    max-height:100vh;
-    padding-bottom:8px;
-    overflow:hidden;
-  }
-  html[data-report-embed="true"] #chapter-2-dashboard .dashboard-shell {
-    flex:1 1 0;
-    min-height:0;
-  }
-  html[data-report-embed="true"] #chapter-2-dashboard .section-stack {
-    height:100%;
-    min-height:0;
-    grid-template-rows:minmax(0,1fr) minmax(0,1fr);
+    min-height:100vh;
+    height:auto;
+    max-height:none;
+    overflow:visible;
   }
 }
 @media(max-width:1100px) and (min-width:761px) {

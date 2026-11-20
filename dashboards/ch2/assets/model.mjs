@@ -1,4 +1,4 @@
-/** Engine-independent filters, selection undo, and financial denominators. */
+/** Engine-independent filters, chart selection, and financial denominators. */
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 export function initialState(data) {
   return {
@@ -7,43 +7,46 @@ export function initialState(data) {
     years: [data.startYear, data.endYear],
     retain: true,
     labScale: "linear",
-    snapshots: {},
+    chartFilter: null,
   };
 }
-export const filterSnapshot = (state) =>
-  clone({
-    group: state.group,
-    organizations: state.organizations,
-    years: state.years,
-  });
 export function groupFor(data, names) {
   const groups = Object.entries(data.groups)
     .filter(([, members]) => names.some((name) => members.includes(name)))
     .map(([name]) => name);
   return groups.length === 1 ? groups[0] : "All";
 }
-export function clearChart(state, id) {
-  const saved = state.snapshots[id];
-  if (saved) {
-    Object.assign(state, clone(saved));
-    state.snapshots = {};
-  }
+export function organizationFromChartEvent(data, params) {
+  if (data.entities.includes(params?.data?.org)) return params.data.org;
+  if (data.entities.includes(params?.seriesName)) return params.seriesName;
+  return null;
 }
-export function selectOrganizations(data, state, id, names) {
-  const selected = data.entities.filter((name) => names.includes(name));
-  if (!selected.length) return clearChart(state, id);
-  state.snapshots[id] ??= filterSnapshot(state);
-  state.organizations = selected;
-  state.group = groupFor(data, selected);
+export function clearChartFilter(state, id) {
+  const filter = state.chartFilter;
+  if (!filter || filter.chartId !== id) return;
+  state.group = filter.previousGroup;
+  state.organizations = [...filter.previousOrganizations];
+  state.chartFilter = null;
+}
+export function selectChartOrganization(data, state, id, organization) {
+  if (!data.entities.includes(organization)) return;
+  const previous = state.chartFilter ?? {
+    previousGroup: state.group,
+    previousOrganizations: [...state.organizations],
+  };
+  state.organizations = [organization];
+  state.group = groupFor(data, state.organizations);
+  state.chartFilter = { ...previous, chartId: id };
 }
 export function manualFilter(data, state, key, value) {
-  state.snapshots = {};
   if (key === "group") {
+    state.chartFilter = null;
     state.group = value;
     state.organizations = [
       ...(value === "All" ? data.entities : data.groups[value]),
     ];
   } else if (key === "organizations") {
+    state.chartFilter = null;
     state.organizations = data.entities.filter((name) => value.includes(name));
     if (state.organizations.length)
       state.group = groupFor(data, state.organizations);

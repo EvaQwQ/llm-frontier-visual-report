@@ -25,7 +25,12 @@
     }));
     if (focusValue) [...menu.querySelectorAll('input')].find(input => input.value === focusValue)?.focus();
     $('organization-current').textContent = [...native.options].every(option => option.selected) ? 'All organizations' : state.organizations.length === 1 ? state.organizations[0] : state.organizations.length + ' organizations';
-    for (const [button, graph] of [['clear-scale','scale-graph'],['clear-lab-revenue','lab-revenue-graph'],['clear-revenue-comparison','revenue-comparison-graph'],['clear-eto','eto-graph']]) $(button).hidden = !state.snapshots[graph];
+    for (const [button, graph] of [['clear-scale','scale-graph'],['clear-lab-revenue','lab-revenue-graph'],['clear-revenue-comparison','revenue-comparison-graph'],['clear-eto','eto-graph']]) {
+      const clearButton = $(button), active = state.chartFilter?.chartId === graph;
+      clearButton.hidden = !active;
+      clearButton.title = 'Clear chart filter and restore the previous organization filters';
+      clearButton.setAttribute('aria-label', 'Clear chart filter and restore previous organization filters');
+    }
     for (const [bound, index] of [['min',0],['max',1]]) { const slider = $('year-' + bound + '-range'); slider.min = data.startYear; slider.max = data.endYear; slider.value = state.years[index]; }
     $('year-range-value').textContent = `${state.years[0]}–${state.years[1]}`;
     const span = data.endYear - data.startYear || 1;

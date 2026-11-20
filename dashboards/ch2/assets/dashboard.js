@@ -2,8 +2,9 @@ import {
   initialState,
   clone,
   manualFilter,
-  selectOrganizations,
-  clearChart,
+  selectChartOrganization,
+  clearChartFilter,
+  organizationFromChartEvent,
   viewData,
 } from "./model.mjs";
 
@@ -11,8 +12,7 @@ const $ = (id) => document.getElementById(id),
   RC = window.ReportCharts,
   E = window.echarts;
 const C = RC?.colors,
-  charts = {},
-  selections = {};
+  charts = {};
 const organizationColors = {
   Amazon: "#758F73",
   "Alphabet / Google": "#70869A",
@@ -26,10 +26,7 @@ const organizationColors = {
   "Mistral AI": "#43A047",
   "Z.ai": "#8E24AA",
 };
-let data,
-  state,
-  views,
-  ignoreClickUntil = 0;
+let data, state, views;
 const esc = (v) =>
   String(v ?? "").replace(
     /[&<>"']/g,
@@ -161,8 +158,7 @@ function legend(id, organizations) {
     )
     .join("");
 }
-function apply(id, option, points = []) {
-  selections[id] = points;
+function apply(id, option) {
   charts[id].setOption(option, { notMerge: true, lazyUpdate: false });
 }
 function line(org, rows, x, metric, index = 0) {
@@ -176,6 +172,7 @@ function line(org, rows, x, metric, index = 0) {
     symbol: "circle",
     symbolSize: 5,
     connectNulls: false,
+    triggerLineEvent: true,
     lineStyle: { color: color(org), width: 2.2, opacity: opacity(org) },
     itemStyle: { color: color(org), opacity: opacity(org) },
     data: [...rows]
@@ -187,7 +184,7 @@ function line(org, rows, x, metric, index = 0) {
         metric,
         value: [x(r), r.value],
       })),
-    emphasis: { focus: "series" },
+    emphasis: { disabled: true },
   };
 }
 function renderScale() {
@@ -247,7 +244,6 @@ function renderScale() {
       axisLabel: { fontSize: 11, formatter: (v) => `${v}%` },
     })),
   ];
-  const points = [];
   visibleNames.forEach((org) => {
     for (const [rows, x, metric, index] of [
       [views.market, (r) => utcDate(r.date), "market", 0],
@@ -256,9 +252,6 @@ function renderScale() {
       const subset = rows.filter((r) => r.org === org);
       if (!subset.length) continue;
       o.series.push(line(org, subset, x, metric, index));
-      subset.forEach((r) =>
-        points.push({ org, axis: index, point: [x(r), r.value] }),
-      );
     }
   });
   for (const [rows, index, metric] of [
@@ -277,7 +270,7 @@ function renderScale() {
           yAxisIndex: index,
           barMaxWidth: 42,
           itemStyle: { color: color(org), opacity: opacity(org) },
-          emphasis: { focus: "series" },
+          emphasis: { disabled: true },
           data: [],
         };
       years().forEach((year) => {
@@ -288,12 +281,6 @@ function renderScale() {
         }
         const floor = cumulative.get(year) || 0;
         cumulative.set(year, floor + r.share);
-        points.push({
-          org,
-          axis: index,
-          point: [String(year), floor + r.share / 2],
-          bar: true,
-        });
         series.data.push({
           ...r,
           org,
@@ -326,14 +313,13 @@ function renderScale() {
         overflow: "break",
       },
     }));
-  apply(id, o, points);
+  apply(id, o);
   legend("scale-legend", visibleNames);
 }
 function renderLabs() {
   const id = "lab-revenue-graph",
     o = base(),
-    orgs = names(views.labs),
-    points = [];
+    orgs = names(views.labs);
   if (!views.labs.length) {
     const noLab = !state.organizations.some((n) =>
       data.groups["AI labs"].includes(n),
@@ -365,12 +351,9 @@ function renderLabs() {
   };
   o.series = orgs.map((org) => {
     const rows = views.labs.filter((r) => r.org === org);
-    rows.forEach((r) =>
-      points.push({ org, axis: 0, point: [utcDate(r.date), r.value] }),
-    );
     return line(org, rows, (r) => utcDate(r.date), "lab");
   });
-  apply(id, o, points);
+  apply(id, o);
   legend("lab-revenue-legend", orgs);
 }
 function renderRevenueScale() {
@@ -379,8 +362,7 @@ function renderRevenueScale() {
     groups = [
       ["public", views.latestPublic],
       ["labs", views.latestLabs],
-    ],
-    points = [];
+    ];
   const total = groups.reduce(
     (sum, [, rows]) => sum + rows.reduce((s, r) => s + r.value, 0),
     0,
@@ -434,11 +416,6 @@ function renderRevenueScale() {
       };
       tile.value = [tile.x0, tile.y0, tile.x1, tile.y1];
       tiles.push(tile);
-      points.push({
-        org: r.org,
-        axis: 0,
-        rect: [tile.x0, tile.y0, tile.x1, tile.y1],
-      });
       if (group === "labs") callouts.push(tile);
       y += height;
     });
@@ -458,6 +435,7 @@ function renderRevenueScale() {
       type: "custom",
       name: "Revenue scale",
       coordinateSystem: "cartesian2d",
+      emphasis: { disabled: true },
       data: tiles,
       renderItem(params, api) {
         const r = tiles[params.dataIndex],
@@ -478,12 +456,12 @@ function renderRevenueScale() {
               lineWidth: 1.5,
               opacity: opacity(r.org),
             },
+            cursor: "pointer",
           },
         ];
         if (r.group === "public" && r.y1 - r.y0 >= 0.09 && r.x1 - r.x0 >= 0.4)
           children.push({
             type: "text",
-            silent: true,
             style: {
               x: (a[0] + b[0]) / 2,
               y: (a[1] + b[1]) / 2,
@@ -500,7 +478,6 @@ function renderRevenueScale() {
             label = api.coord([Math.min(tileWidth + 0.03, 0.76), r.calloutY]);
           children.push({
             type: "line",
-            silent: true,
             shape: { x1: target[0], y1: target[1], x2: label[0], y2: label[1] },
             style: {
               stroke: color(r.org),
@@ -510,7 +487,6 @@ function renderRevenueScale() {
           });
           children.push({
             type: "text",
-            silent: true,
             style: {
               x: label[0] + 2,
               y: label[1],
@@ -526,13 +502,12 @@ function renderRevenueScale() {
       },
     },
   ];
-  apply(id, o, points);
+  apply(id, o);
 }
 function renderPublications() {
   const id = "eto-graph",
     o = base(),
-    orgs = names(views.publications),
-    points = [];
+    orgs = names(views.publications);
   if (!orgs.length) {
     apply(id, {
       ...o,
@@ -577,8 +552,9 @@ function renderPublications() {
         id: `publication-segment-${org}-${first}`,
         name: org,
         type: "line",
-        silent: true,
         showSymbol: false,
+        triggerLineEvent: true,
+        emphasis: { disabled: true },
         lineStyle: {
           color: color(org),
           type: dash ? "dashed" : "solid",
@@ -609,17 +585,10 @@ function renderPublications() {
           opacity: opacity(org),
         },
       })),
-      emphasis: { focus: "series" },
+      emphasis: { disabled: true },
     });
-    rows.forEach((r) =>
-      points.push({
-        org,
-        axis: 0,
-        point: [String(r.year), r.value],
-      }),
-    );
   });
-  apply(id, o, points);
+  apply(id, o);
   legend("eto-legend", orgs);
 }
 function syncControls() {
@@ -648,105 +617,27 @@ function render() {
   renderRevenueScale();
   renderPublications();
 }
-function choose(id, names) {
-  selectOrganizations(data, state, id, names);
+function choose(id, organization) {
+  selectChartOrganization(data, state, id, organization);
   render();
 }
-function restore(id) {
-  clearChart(state, id);
+function clearSelection(id) {
+  clearChartFilter(state, id);
   render();
 }
 
-/** A rectangular mark selection, independent of engine-internal series indices.
- * ECharts owns all marks; its coordinate conversion keeps brush geometry aligned
- * across four axes, log scales, stacked bars and revenue rectangles.
- */
-function bindSelection(id) {
-  const host = $(id),
-    chart = charts[id];
-  let drag = null,
-    box;
-  chart.on("click", (p) => {
-    if (Date.now() < ignoreClickUntil) return;
-    if (p.data?.org) choose(id, [p.data.org]);
+function bindChartFilter(id) {
+  const chart = charts[id],
+    host = $(id);
+  chart.on("click", (params) => {
+    const organization = organizationFromChartEvent(data, params);
+    if (organization) choose(id, organization);
   });
-  const position = (e) => {
-    const r = host.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
-  };
-  host.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || e.pointerType === "touch") return;
-    drag = { start: position(e), end: position(e), active: false };
+  chart.on("mouseover", (params) => {
+    host.style.cursor = organizationFromChartEvent(data, params) ? "pointer" : "";
   });
-  window.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    drag.end = position(e);
-    const [a, b] = drag.start,
-      [x, y] = drag.end;
-    if (Math.hypot(x - a, y - b) > 5) {
-      drag.active = true;
-      ignoreClickUntil = Date.now() + 300;
-      if (!box) {
-        box = document.createElement("div");
-        box.className = "selection-rectangle";
-        host.appendChild(box);
-      }
-      Object.assign(box.style, {
-        left: `${Math.min(a, x)}px`,
-        top: `${Math.min(b, y)}px`,
-        width: `${Math.abs(x - a)}px`,
-        height: `${Math.abs(y - b)}px`,
-      });
-    }
-  });
-  window.addEventListener("pointerup", () => {
-    if (!drag) return;
-    const current = drag;
-    drag = null;
-    box?.remove();
-    box = null;
-    if (!current.active) return;
-    ignoreClickUntil = Date.now() + 300;
-    const lo = [
-        Math.min(current.start[0], current.end[0]),
-        Math.min(current.start[1], current.end[1]),
-      ],
-      hi = [
-        Math.max(current.start[0], current.end[0]),
-        Math.max(current.start[1], current.end[1]),
-      ];
-    const inside = (p) =>
-      p &&
-      Number.isFinite(p[0]) &&
-      Number.isFinite(p[1]) &&
-      p[0] >= lo[0] &&
-      p[0] <= hi[0] &&
-      p[1] >= lo[1] &&
-      p[1] <= hi[1];
-    const selected = (selections[id] || [])
-      .filter((mark) => {
-        const finder = { xAxisIndex: mark.axis, yAxisIndex: mark.axis };
-        if (mark.rect) {
-          const [x0, y0, x1, y1] = mark.rect,
-            a = chart.convertToPixel(finder, [x0, y0]),
-            b = chart.convertToPixel(finder, [x1, y1]);
-          return (
-            Math.max(a[0], b[0]) >= lo[0] &&
-            Math.min(a[0], b[0]) <= hi[0] &&
-            Math.max(a[1], b[1]) >= lo[1] &&
-            Math.min(a[1], b[1]) <= hi[1]
-          );
-        }
-        return inside(chart.convertToPixel(finder, mark.point));
-      })
-      .map((mark) => mark.org);
-    if (selected.length) choose(id, selected);
-    else restore(id);
-  });
-  window.addEventListener("pointercancel", () => {
-    drag = null;
-    box?.remove();
-    box = null;
+  chart.on("globalout", () => {
+    host.style.cursor = "";
   });
 }
 async function boot() {
@@ -765,7 +656,7 @@ async function boot() {
       "eto-graph",
     ].forEach((id) => {
       charts[id] = RC.init($(id));
-      bindSelection(id);
+      bindChartFilter(id);
     });
     $("group-filter").addEventListener("change", (e) => {
       manualFilter(data, state, "group", e.target.value);
@@ -804,7 +695,7 @@ async function boot() {
       ["clear-revenue-comparison", "revenue-comparison-graph"],
       ["clear-eto", "eto-graph"],
     ])
-      $(button).addEventListener("click", () => restore(id));
+      $(button).addEventListener("click", () => clearSelection(id));
     $("clear-all").addEventListener("click", () => {
       const { retain, labScale } = state;
       state = { ...initialState(data), retain, labScale };
@@ -819,7 +710,7 @@ async function boot() {
       getState: () => clone(state),
       getViews: () => clone(views),
       getData: () => clone(data),
-      selectOrganizations: choose,
+      selectOrganization: choose,
     };
   } catch (error) {
     $("load-error").hidden = false;
